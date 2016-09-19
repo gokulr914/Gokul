@@ -1,0 +1,41 @@
+import collections 
+import csv
+
+arr = [] 
+chunks = []
+sequence = []
+outside = []
+array = []
+waste = []
+
+csvPath= '/home/gokul/Downloads/incubator-singa/examples/lstm/a/b/train_data.csv'
+
+
+def xls2csv(Path,sep):
+	with open(Path,'r') as ins:
+        	reader = csv.reader(ins,delimiter=',')
+ 		for row in reader:
+			array.append(row[0]);
+			chunks.append(row[1]);
+			sequence.append(row[2]);
+		
+				
+	
+#def window(size,sequence,step):
+	step=3
+	with open('petw1.csv','wb') as csvfile:
+		spamwriter = csv.writer(csvfile,delimiter=',',quotechar='|',)
+		for i in range(0,50,10):
+			spamwriter.writerow((array[i:step])+(chunks[i:step])+(sequence[i:step])+(array[i+3:step+3])+(chunks[i+3:step+3])+(sequence[i+3:step+3])+(array[i+6:step+6])+(chunks[i+6:step+6])+(sequence[i+6:step+6]))
+			step=step+10
+						
+
+sequence = xls2csv(csvPath,',')
+#window(30,sequence,3)
+    
+
+
+
+
+
+
