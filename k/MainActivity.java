@@ -19,6 +19,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.support.v4.app.ActivityCompat;
 import android.support.v7.app.AppCompatActivity;
+import android.support.v7.widget.LinearLayoutCompat;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.View;
@@ -46,12 +47,18 @@ import java.util.ArrayList;
 import com.opencsv.CSVWriter;
 import java.lang.Thread;
 import java.util.Calendar;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import android.media.MediaScannerConnection;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Environment;
+import com.csvreader.CsvWriter;
+import java.lang.Runnable;
 
-import org.w3c.dom.Text;
 
-public class MainActivity extends Activity implements SensorEventListener {
+public class MainActivity extends Activity{
 
     private  final String TAG = "MainActivity";
     private  final int PIXEL_WIDTH = 28;
@@ -68,20 +75,22 @@ public class MainActivity extends Activity implements SensorEventListener {
     final static int windowSize=128;
     protected float[] gravSensorVals= new float[3];
     protected float[] gravSensorvals= new float[]{0,0,0};
-    protected float[] gravSensorVals_1= new float[3];
-    protected float[] gravSensorvals_1= new float[]{0,0,0};
-    private static ArrayList<float[]> AccHistory = new ArrayList<float[]>();
-    private static ArrayList<float[]> AccHistory_1 = new ArrayList<float[]>();
-    private static ArrayList<float[]> AccHistory_2 = new ArrayList<float[]>();
-    private static ArrayList<float[]> AccHistory_3 = new ArrayList<float[]>();
-    private static ArrayList<float[]> AccHistory_4 = new ArrayList<float[]>();
+
+    //Computation values and declaration
+    private static ArrayList<float[]> Time_Gravity_Acc = new ArrayList<float[]>();
+    private static ArrayList<float[]> Time_Linear_Acc = new ArrayList<float[]>();
+    private static ArrayList<float[]> Time_Gyro_Acc = new ArrayList<float[]>();
+    private static ArrayList<float[]> Freq_Linear_Acc = new ArrayList<float[]>();
+    private static ArrayList<float[]> Freq_Gyro_Acc = new ArrayList<float[]>();
     private static List<float[]> results = new ArrayList<float[]>();
-    private static ComputationHandler compHandler;
-    private static CompHandler_1 compHandler_1;
-    private static CompHandler_2 compHandler_2;
-    private static CompHandler_3 compHandler_3;
-    private static CompHandler_4 compHandler_4;
-    public File resultsFile;
+
+    private static Time_Gravity_Acc_Compute Compute_Time_Gravity_Acc;
+    private static Time_Linear_Acc_Compute Compute_Time_Linear_Acc;
+    private static Time_Gyro_Acc_Compute Compute_Time_Gyro_Acc;
+    private static Freq_Linear_Acc_Compute Compute_Freq_Linear_Acc;
+    private static Freq_Gyro_Acc_Compute Compute_Freq_Gyro_Acc;
+
+    //filter values and declaration
     protected float[] gravity= new float[]{0,0,0};
     protected float[] gravity_1= new float[]{0,0,0};
     final float[] linear_acceleration= new float[3];
@@ -101,13 +110,9 @@ public class MainActivity extends Activity implements SensorEventListener {
     float timestampOld = 0;
     int count=0;
     int count_1=0;
-    private boolean logData = true;
-    private long logTime = 0;
-    private DecimalFormat df;
-    private String log;
+
     android.os.Handler handler = new android.os.Handler();
     Button button_logger_mode;
-    SensorEventListener Se;
     private static Button saveButton;
     protected boolean dataReady= false;
     MedianFilter mdfOutput = new MedianFilter();
@@ -115,21 +120,22 @@ public class MainActivity extends Activity implements SensorEventListener {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        //Initialise Sensor Manager and Sensor
         mSensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
         accelerometer = mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-        compHandler = new ComputationHandler();
-        compHandler_1 = new CompHandler_1();
-        compHandler_2 = new CompHandler_2();
-        compHandler_3 = new CompHandler_3();
-        compHandler_4 = new CompHandler_4();
 
-        initButtonLogger();
+        //Creating Instances of the three classes
+        Compute_Time_Gravity_Acc = new Time_Gravity_Acc_Compute();
+        Compute_Time_Linear_Acc = new Time_Linear_Acc_Compute();
+        // Compute_Time_Gyro_Acc = new Time_Gyro_Acc_Compute();
 
+        //Register Sensor Event Listener
         if (accelerometer != null) {
-            mSensorManager.registerListener(this, accelerometer, 20);
-            dataReady = true;
+            mSensorManager.registerListener(Se, accelerometer, 20, handler);
         }
 
+        //Unregister Sensor Event Listener
         Runnable runable = new Runnable()
         {
             @Override
@@ -144,63 +150,58 @@ public class MainActivity extends Activity implements SensorEventListener {
             }
         };
 
+        //Initialise Text View Variables
         X = (TextView) findViewById(R.id.X);
         Y = (TextView) findViewById(R.id.Y);
         Z = (TextView) findViewById(R.id.Z);
+
+        //Initialise Save Results Button
+        saveButton = (Button) findViewById(R.id.SaveButton);
+        saveButton.setClickable(false);
+
     }
 
-    @Override
-    public void onSensorChanged(SensorEvent event) {
+    SensorEventListener Se = new SensorEventListener() {
 
-        gravSensorVals = mdfOutput.addSamples(event.values);
-        gravSensorvals = lowPass(gravSensorVals,gravSensorvals);
-        gravity = lowPass_1(gravSensorvals,gravity);
+        public void onSensorChanged(SensorEvent event) {
 
-        linear_acceleration[0] = event.values[0] - gravity[0];
-        linear_acceleration[1] = event.values[1] - gravity[1];
-        linear_acceleration[2] = event.values[2] - gravity[2];
-
-        Gy gy = new Gy();
-        gyro_linear_acceleration = gy.return_values();
-
-        la= convertFloatsToDoubles(linear_acceleration);
-        FastFourierTransformer fft= new FastFourierTransformer(DftNormalization.STANDARD);
-        Complex[] nw= fft.transform(la,TransformType.FORWARD);
-
-        la= convertFloatsToDoubles(gyro_linear_acceleration);
-        FastFourierTransformer fft_1= new FastFourierTransformer(DftNormalization.STANDARD);
-        Complex[] nw_1= fft_1.transform(la,TransformType.FORWARD);
-
-        f[0]= (float)nw[0].getReal();
-        f[1]= (float)nw[1].getReal();
-        f[2]= (float)nw[2].getReal();
-
-        f_1[0]= (float)nw_1[0].getReal();
-        f_1[1]= (float)nw_1[1].getReal();
-        f_1[2]= (float)nw_1[2].getReal();
-
-        AccHistory.add(gravity);    //time_gravity_acc
-        Compute();
-        AccHistory_1.add(linear_acceleration);  //time_body_acc
-        Compute_1();
-        AccHistory_2.add(gyro_linear_acceleration); //time_body_gyro
-        Compute_2();
-        AccHistory_3.add(f); //frequency_body_acc
-        Compute_3();
-        AccHistory_4.add(f_1); //frequency_gyro_acc
-        Compute_4();
+            //Real-time sensor values after going through median filter
+            gravSensorVals = mdfOutput.addSamples(event.values);
+            //Real-time Sensor Values after low-pass Butterworth filter
+            gravSensorvals = lowPass(gravSensorVals, gravSensorvals);
+            //Real-time Sensor Values after another low-pass filter
+            gravity = lowPass_1(gravSensorvals, gravity);
 
 
-        X.setText("X:" + gravity[0]);
-        Y.setText("Y:" + gravity[1]);
-        Z.setText("Z:" + gravity[2]);
-    }
 
-    @Override
-    public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+            //Real-time Linear Acceleration values after removing the effects gravity
+            linear_acceleration[0] = event.values[0] - gravity[0];
+            linear_acceleration[1] = event.values[1] - gravity[1];
+            linear_acceleration[2] = event.values[2] - gravity[2];
+
+            // store real-time gravity_acc in time domain
+            Time_Gravity_Acc.add(gravity);
+            Create_Window_Compute_Gravity_Acc_Time();
+
+            //store real-time Linear Acc in time domain
+            Time_Linear_Acc.add(linear_acceleration);
+            Create_Window_Compute_Linear_Acc_Time();
+
+            //display acceleration values on screen
+            X.setText("X:" + gravity[0]);
+            Y.setText("Y:" + gravity[1]);
+            Z.setText("Z:" + gravity[2]);
+        }
+
+
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+    };
 
     public void updateUI(String x){}
 
+
+
+    //Pass through low-pass filter of butterWorth filter
     protected float[] lowPass(float[] input, float[] output) {
         if(timestampOld ==0){
             timestampOld = System.nanoTime();
@@ -210,14 +211,16 @@ public class MainActivity extends Activity implements SensorEventListener {
 
         alpha_1 = timeConstant / (timeConstant+dt);
 
-     if(count > 5){
+        if(count > 5){
 
-        output[0] = (alpha_1 *output[0]) + ((1.0f-alpha_1) * (input[0])) ;
-        output[1] = (alpha_1 *output[1]) + ((1.0f-alpha_1) * (input[1])) ;
-        output[2] = (alpha_1 *output[2]) + ((1.0f-alpha_1) * (input[2])) ;
+            output[0] = (alpha_1 *output[0]) + ((1.0f-alpha_1) * (input[0])) ;
+            output[1] = (alpha_1 *output[1]) + ((1.0f-alpha_1) * (input[1])) ;
+            output[2] = (alpha_1 *output[2]) + ((1.0f-alpha_1) * (input[2])) ;
         }
         return output;
     }
+
+    //Pass through another low-pass filter
     protected float[] lowPass_1(float[] input, float[] output) {
         if(timestampOld ==0){
             timestampOld = System.nanoTime();
@@ -236,197 +239,151 @@ public class MainActivity extends Activity implements SensorEventListener {
         return output;
     }
 
-    public static void Compute() {
 
-        if (AccHistory.size() >= windowSize) {
+    public  void Create_Window_Compute_Gravity_Acc_Time() {
 
-            final ArrayList<float[]> dataToProcess = new ArrayList<float[]>();
+        if (Time_Gravity_Acc.size() >= windowSize) {   //Create Window and process only if ArrayList size is greater than WindowSize
 
-                for (int counter = 0; counter < windowSize; counter++) {
-                    float[] temp = new float[3];
+            final ArrayList<float[]> Window_To_Be_Processed = new ArrayList<float[]>();  //Create a temporary array to store the values
 
-                    temp[0] = AccHistory.get(counter)[0];
-                    temp[1] = AccHistory.get(counter)[1];
-                    temp[2] = AccHistory.get(counter)[2];
+            for (int counter = 0; counter < windowSize; counter++) {
 
-                    dataToProcess.add(temp);
+                float[] temp = new float[3];
+                temp[0] = Time_Gravity_Acc.get(counter)[0];  //Creating a time window of X,Y and Z values
+                temp[1] = Time_Gravity_Acc.get(counter)[1];
+                temp[2] = Time_Gravity_Acc.get(counter)[2];
 
+                Window_To_Be_Processed.add(temp);
+            }
+
+            Thread computationThread = new Thread() {
+                @Override
+                public void run() {
+                    Compute_Time_Gravity_Acc.processData(Window_To_Be_Processed);    //Sending the Window data for Computation
                 }
-                Thread computationThread = new Thread() {
-                    @Override
-                    public void run() {
-                        //Min,max and standard deviation of the current window are calculated and stored
-                        compHandler.processData(dataToProcess);
+            };
+
+            for (int counter = (int) windowSize / 2; counter > 0; counter--) {
+                Time_Gravity_Acc.remove(0);      //Removing the first half of the window so that overlap occurs
+            }
+
+            computationThread.start();
+
+            if (!saveButton.isClickable()) saveButton.setClickable(true);
+        }
+    }
+
+    public static void Create_Window_Compute_Linear_Acc_Time() {
+
+        if (Time_Linear_Acc.size() >= windowSize) {  //Create Window and process only if ArrayList size is greater than WindowSize
+
+            final ArrayList<float[]> Window_To_Be_Processed_1 = new ArrayList<float[]>();
+
+            for (int counter = 0; counter < windowSize; counter++) {
+                float[] temp_1 = new float[3];   //Create a temporary array to store the values
+
+                temp_1[0] = Time_Linear_Acc.get(counter)[0];  //Creating a time window of X,Y and Z values
+                temp_1[1] = Time_Linear_Acc.get(counter)[1];
+                temp_1[2] = Time_Linear_Acc.get(counter)[2];
+
+                Window_To_Be_Processed_1.add(temp_1);
+
+            }
+            Thread computationThread = new Thread() {
+                @Override
+                public void run() {
+                    Compute_Time_Linear_Acc.processData(Window_To_Be_Processed_1);   //Sending the Window data for Computation
+                }
+            };
+
+            for (int counter = (int) windowSize / 2; counter > 0; counter--) {
+                Time_Linear_Acc.remove(0);   //Removing the first half of the window so that overlap occurs
+            }
+            computationThread.start();
+
+            if (!saveButton.isClickable()) saveButton.setClickable(true);
+        }
+    }
+
+
+    public void SaveResults(View view) {
+
+        Thread fileThread = new Thread() {
+            @Override
+            public void run() {
+                Calendar c = Calendar.getInstance();
+                String filename = "AccelerationExplorer-" + c.get(Calendar.YEAR) + "-"
+                        + (c.get(Calendar.MONTH) + 1) + "-"
+                        + c.get(Calendar.DAY_OF_MONTH) + c.get(Calendar.HOUR) + c.get(Calendar.MINUTE) + c.get(Calendar.SECOND) + "-000"
+                        + ".csv";
+
+                File dir = new File(Environment.getExternalStorageDirectory()
+                        + File.separator + "AccelerationExplorer" + File.separator
+                        + "Logs");
+                if (!dir.exists()) {
+                    dir.mkdirs();
+                }
+                File file = new File(dir, filename);
+
+                try {
+                    //Get the Results for the  processed signals
+                    List<float[]> Time_Gravity_Acc_Results = Compute_Time_Gravity_Acc.getResults();
+                    List<float[]> Time_Linear_Acc_Results = Compute_Time_Linear_Acc.getResults();
+
+
+                    //Create an Iterator instance to iterate through each of the results
+                    Iterator<float[]> Time_Gravity_Acc_results_Iterator = Time_Gravity_Acc_Results.iterator();
+                    Iterator<float[]> Time_Linear_Acc_results_Iterator = Time_Linear_Acc_Results.iterator();
+
+
+                    while (Time_Gravity_Acc_results_Iterator.hasNext() && Time_Linear_Acc_results_Iterator.hasNext())
+                    {
+
+                        //Get the Computed X,Y,Z results for the Gravity Acceleration in Time domain
+                        float[] Time_Gravity_Acc_results_X = (float[]) Time_Gravity_Acc_results_Iterator.next();
+                        float[] Time_Gravity_Acc_results_Y = (float[]) Time_Gravity_Acc_results_Iterator.next();
+                        float[] Time_Gravity_Acc_results_Z = (float[]) Time_Gravity_Acc_results_Iterator.next();
+
+                        //Get the Computed X,Y,Z results for the Linear Acceleration results in Time domain
+                        float[] Time_Linear_Acc_results_X = (float[]) Time_Linear_Acc_results_Iterator.next();
+                        float[] Time_Linear_Acc_results_Y = (float[]) Time_Linear_Acc_results_Iterator.next();
+                        float[] Time_Linear_Acc_results_Z = (float[]) Time_Linear_Acc_results_Iterator.next();
+
+                        CsvWriter csvOutput = new CsvWriter(new FileWriter(file, true), ',');
+
+                        //Write the files to a CSV file for each of the signals in this order and combine them
+                        //X-Mean, Y-Mean, Z-Mean, X-Max,Y-Max,Z-Max,X-Standard Deviation, Y-Standard Deviation, Z-Standard Deviation
+                        //X-Min, Y-Min, Z-Min, X-Variance, Y- Variance, Z-Variance
+
+                        for(int i=0;i<5;i++){
+                            csvOutput.write(String.valueOf(Time_Gravity_Acc_results_X[i]));
+                            csvOutput.write(String.valueOf(Time_Gravity_Acc_results_Y[i]));
+                            csvOutput.write(String.valueOf(Time_Gravity_Acc_results_Z[i]));
+                        }
+
+                        for(int i=0;i<5;i++){
+                            csvOutput.write(String.valueOf(Time_Linear_Acc_results_X[i]));
+                            csvOutput.write(String.valueOf(Time_Linear_Acc_results_Y[i]));
+                            csvOutput.write(String.valueOf(Time_Linear_Acc_results_Z[i]));
+                        }
+
+                        csvOutput.endRecord();
+                        csvOutput.close();
                     }
-                };
-
-                for (int counter = (int) windowSize / 2; counter > 0; counter--) {
-                    AccHistory.remove(0);
+                } catch (FileNotFoundException e) {} catch (IOException e) {
+                } finally {
+                    new MediaScannerConnection.OnScanCompletedListener() {
+                        @Override
+                        public void onScanCompleted(final String path,
+                                                    final Uri uri) {
+                        }
+                    };
                 }
-                computationThread.start();
-
-                if (!saveButton.isClickable()) saveButton.setClickable(true);
             }
+
+        };
+        fileThread.start();
     }
-
-    public static void Compute_1() {
-
-        if (AccHistory_1.size() >= windowSize) {
-
-            final ArrayList<float[]> dataToProcess_1 = new ArrayList<float[]>();
-
-            for (int counter = 0; counter < windowSize; counter++) {
-                float[] temp_1 = new float[3];
-
-                temp_1[0] = AccHistory_1.get(counter)[0];
-                temp_1[1] = AccHistory_1.get(counter)[1];
-                temp_1[2] = AccHistory_1.get(counter)[2];
-
-                dataToProcess_1.add(temp_1);
-
-            }
-            Thread computationThread = new Thread() {
-                @Override
-                public void run() {
-                    //Min,max and standard deviation of the current window are calculated and stored
-                    compHandler_1.processData(dataToProcess_1);
-                }
-            };
-
-            for (int counter = (int) windowSize / 2; counter > 0; counter--) {
-                AccHistory_1.remove(0);
-            }
-            computationThread.start();
-
-            if (!saveButton.isClickable()) saveButton.setClickable(true);
-        }
-    }
-
-    public static void Compute_2() {
-
-        if (AccHistory_2.size() >= windowSize) {
-
-            final ArrayList<float[]> dataToProcess_2 = new ArrayList<float[]>();
-
-            for (int counter = 0; counter < windowSize; counter++) {
-                float[] temp_2 = new float[3];
-
-                temp_2[0] = AccHistory_2.get(counter)[0];
-                temp_2[1] = AccHistory_2.get(counter)[1];
-                temp_2[2] = AccHistory_2.get(counter)[2];
-
-                dataToProcess_2.add(temp_2);
-
-            }
-            Thread computationThread = new Thread() {
-                @Override
-                public void run() {
-                    //Min,max and standard deviation of the current window are calculated and stored
-                    compHandler_2.processData(dataToProcess_2);
-                }
-            };
-
-            for (int counter = (int) windowSize / 2; counter > 0; counter--) {
-                AccHistory_2.remove(0);
-            }
-            computationThread.start();
-
-            if (!saveButton.isClickable()) saveButton.setClickable(true);
-        }
-    }
-
-    public static void Compute_3() {
-
-        if (AccHistory_3.size() >= windowSize) {
-
-            final ArrayList<float[]> dataToProcess_3 = new ArrayList<float[]>();
-
-            for (int counter = 0; counter < windowSize; counter++) {
-                float[] temp_3 = new float[3];
-
-                temp_3[0] = AccHistory_3.get(counter)[0];
-                temp_3[1] = AccHistory_3.get(counter)[1];
-                temp_3[2] = AccHistory_3.get(counter)[2];
-
-                dataToProcess_3.add(temp_3);
-
-            }
-            Thread computationThread = new Thread() {
-                @Override
-                public void run() {
-                    //Min,max and standard deviation of the current window are calculated and stored
-                    compHandler_3.processData(dataToProcess_3);
-                }
-            };
-
-            for (int counter = (int) windowSize / 2; counter > 0; counter--) {
-                AccHistory_3.remove(0);
-            }
-            computationThread.start();
-
-            if (!saveButton.isClickable()) saveButton.setClickable(true);
-        }
-    }
-
-
-    public static void Compute_4() {
-
-        if (AccHistory_4.size() >= windowSize) {
-
-            final ArrayList<float[]> dataToProcess_4 = new ArrayList<float[]>();
-
-            for (int counter = 0; counter < windowSize; counter++) {
-                float[] temp_4 = new float[3];
-
-                temp_4[0] = AccHistory_4.get(counter)[0];
-                temp_4[1] = AccHistory_4.get(counter)[1];
-                temp_4[2] = AccHistory_4.get(counter)[2];
-
-                dataToProcess_4.add(temp_4);
-
-            }
-            Thread computationThread = new Thread() {
-                @Override
-                public void run() {
-                    //Min,max and standard deviation of the current window are calculated and stored
-                    compHandler_4.processData(dataToProcess_4);
-                }
-            };
-
-            for (int counter = (int) windowSize / 2; counter > 0; counter--) {
-                AccHistory_4.remove(0);
-            }
-            computationThread.start();
-
-            if (!saveButton.isClickable()) saveButton.setClickable(true);
-        }
-    }
-
-    public static double[] convertFloatsToDoubles(float[] input)
-    {
-        if (input == null)
-        {
-            return null; // Or throw an exception - your choice
-        }
-        double[] output = new double[input.length];
-        for (int i = 0; i < input.length; i++)
-        {
-            output[i] = input[i];
-        }
-        return output;
-    }
-
-    private void initButtonLogger() {
-        Button button = (Button) this.findViewById(R.id.button_logger_mode);
-        button.setOnClickListener(new View.OnClickListener() {
-            public void onClick(View v) {
-                Intent intent = new Intent(MainActivity.this, Logger.class);
-                startActivity(intent);
-            }
-        });
 }
-}
-
-
 
 
